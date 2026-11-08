@@ -1,0 +1,818 @@
+<!doctype html>
+<html lang="es">
+
+<head>
+    <meta charset="utf-8" />
+
+    <meta name="viewport"
+          content="width=device-width, initial-scale=1, viewport-fit=cover" />
+
+    <title>WebAR — MindAR + Unity</title>
+
+    <!-- A-Frame -->
+    <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
+
+    <!-- MindAR -->
+    <script src="https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-image-aframe.prod.js"></script>
+
+    <style>
+
+        html,
+        body {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+
+            background: transparent;
+        }
+
+
+        /* =========================================
+        CAPA 1 — VIDEO DE LA CÁMARA
+        ========================================= */
+
+        video {
+            position: fixed !important;
+
+            top: 0 !important;
+            left: 0 !important;
+
+            width: 100vw !important;
+            height: 100vh !important;
+
+            object-fit: cover !important;
+
+            z-index: 1 !important;
+
+            opacity: 1 !important;
+            visibility: visible !important;
+        }
+
+
+        /* =========================================
+        CAPA 2 — MINDAR / A-FRAME
+        ========================================= */
+
+        a-scene {
+            position: fixed !important;
+
+            top: 0 !important;
+            left: 0 !important;
+
+            width: 100vw !important;
+            height: 100vh !important;
+
+            z-index: 2 !important;
+
+            background: transparent !important;
+        }
+
+        .a-canvas {
+            background: transparent !important;
+        }
+
+
+        /* =========================================
+        CAPA 3 — UNITY
+        ========================================= */
+
+        #unity-container {
+            position: fixed !important;
+
+            top: 0 !important;
+            left: 0 !important;
+
+            width: 100vw !important;
+            height: 100vh !important;
+
+            z-index: 3 !important;
+
+            pointer-events: auto;
+
+            touch-action: none;
+
+            background: transparent !important;
+        }
+
+        #unity-canvas {
+            display: block !important;
+
+            width: 100% !important;
+            height: 100% !important;
+
+            touch-action: none;
+
+            background: transparent !important;
+        }
+
+
+        /* =========================================
+        STATUS
+        ========================================= */
+
+        #status {
+            position: fixed;
+
+            z-index: 10;
+
+            left: 50%;
+            top: env(safe-area-inset-top, 12px);
+
+            transform: translateX(-50%);
+
+            margin-top: 12px;
+
+            padding: 10px 14px;
+
+            border-radius: 999px;
+
+            background: rgba(0, 0, 0, 0.70);
+
+            color: white;
+
+            font-size: 14px;
+
+            text-align: center;
+
+            pointer-events: none;
+        }
+
+
+        /* =========================================
+        INSTRUCCIONES
+        ========================================= */
+
+        #instructions {
+            position: fixed;
+
+            z-index: 10;
+
+            left: 50%;
+            bottom: 24px;
+
+            transform: translateX(-50%);
+
+            width: min(90vw, 520px);
+
+            box-sizing: border-box;
+
+            padding: 12px 16px;
+
+            border-radius: 14px;
+
+            background: rgba(0, 0, 0, 0.70);
+
+            color: white;
+
+            font-size: 14px;
+
+            text-align: center;
+
+            pointer-events: none;
+        }
+    </style>
+
+</head>
+
+
+<body>
+
+
+    <!-- ==========================================
+         INFORMACIÓN DE ESTADO
+         ========================================== -->
+
+    <div id="status">
+        Inicializando...
+    </div>
+
+
+    <div id="instructions">
+        Apunta la cámara al marcador.
+    </div>
+
+
+    <!-- ==========================================
+         MINDAR / A-FRAME
+         ========================================== -->
+
+    <a-scene
+        mindar-image="
+            imageTargetSrc: ./assets/targets.mind;
+            maxTrack: 1;
+            filterMinCF: 0.001;
+            filterBeta: 0.01;
+            uiLoading: no;
+            uiError: no;
+            uiScanning: no
+        "
+        color-space="sRGB"
+        renderer="alpha: true"
+        vr-mode-ui="enabled: false"
+        device-orientation-permission-ui="enabled: false"
+        embedded
+    >
+
+        <a-camera
+            position="0 0 0"
+            look-controls="enabled: false">
+        </a-camera>
+
+
+        <!-- TARGET DE MINDAR -->
+
+        <a-entity
+            id="target"
+            mindar-image-target="targetIndex: 0">
+
+        </a-entity>
+
+    </a-scene>
+
+
+    <!-- ==========================================
+         UNITY WEBGL
+         ========================================== -->
+
+    <div id="unity-container">
+
+        <canvas
+            id="unity-canvas"
+            tabindex="-1">
+        </canvas>
+
+    </div>
+
+
+    <!-- ==========================================
+         UNITY LOADER
+         ========================================== -->
+
+    <script src="./UnityBuild/Build/mindar-test.loader.js"></script>
+
+
+    <!-- ==========================================
+         JAVASCRIPT
+         ========================================== -->
+
+    <script>
+
+        /*
+        ============================================================
+        REFERENCIAS
+        ============================================================
+        */
+
+
+        const status =
+            document.getElementById("status");
+
+        const target =
+            document.getElementById("target");
+
+        const unityCanvas =
+            document.getElementById("unity-canvas");
+
+
+        /*
+        ============================================================
+        VARIABLES DE UNITY
+        ============================================================
+        */
+
+        let unityInstance = null;
+
+        let unityReady = false;
+
+        /*
+        Estado del target.
+
+        Es importante guardar el estado aunque Unity todavía
+        no haya terminado de cargar.
+        */
+
+        let targetIsFound = false;
+
+        let mindARReady = false;
+
+        // ============================================================
+        // PINCH ZOOM — JAVASCRIPT → UNITY
+        // ============================================================
+
+        let previousPinchDistance = null;
+
+        function getTouchDistance(touches) {
+
+            if (!touches || touches.length < 2) {
+                return null;
+            }
+
+            const dx = touches[0].clientX - touches[1].clientX;
+            const dy = touches[0].clientY - touches[1].clientY;
+
+            return Math.hypot(dx, dy);
+        }
+
+
+        function handlePinchStart(event) {
+
+            if (event.touches.length < 2) {
+                previousPinchDistance = null;
+                return;
+            }
+
+            const distance = getTouchDistance(event.touches);
+
+            if (distance === null) {
+                previousPinchDistance = null;
+                return;
+            }
+
+            previousPinchDistance = distance;
+        }
+
+        function handlePinchMove(event) {
+
+            if (event.touches.length !== 2) {
+                return;
+            }
+
+            event.preventDefault();
+
+            if (!unityReady || !unityInstance) {
+                return;
+            }
+
+            const currentDistance =
+                getTouchDistance(event.touches);
+
+            if (currentDistance === null) {
+                return;
+            }
+
+            if (previousPinchDistance === null) {
+                previousPinchDistance = currentDistance;
+                return;
+            }
+
+            const delta =
+                currentDistance - previousPinchDistance;
+
+            if (Math.abs(delta) > 0.01) {
+
+                unityInstance.SendMessage(
+                    "WebARController",
+                    "ApplyPinch",
+                    delta.toString()
+                );
+            }
+
+            previousPinchDistance =
+                currentDistance;
+        }
+
+
+        function handlePinchEnd(event) {
+
+            if (event.touches.length < 2) {
+                previousPinchDistance = null;
+            }
+        }
+
+
+        // ============================================================
+        // EVENTOS TOUCH DEL CANVAS DE UNITY
+        // ============================================================
+
+        unityCanvas.addEventListener(
+            "touchstart",
+            handlePinchStart,
+            { passive: false }
+        );
+
+        unityCanvas.addEventListener(
+            "touchmove",
+            handlePinchMove,
+            { passive: false }
+        );
+
+        unityCanvas.addEventListener(
+            "touchend",
+            handlePinchEnd,
+            { passive: false }
+        );
+
+        unityCanvas.addEventListener(
+            "touchcancel",
+            handlePinchEnd,
+            { passive: false }
+        );
+
+
+        /*
+        ============================================================
+        CONFIGURACIÓN DE UNITY
+        ============================================================
+        */
+
+        const unityConfig = {
+
+            dataUrl:
+                "./UnityBuild/Build/mindar-test.data",
+
+            frameworkUrl:
+                "./UnityBuild/Build/mindar-test.framework.js",
+
+            codeUrl:
+                "./UnityBuild/Build/mindar-test.wasm",
+
+            streamingAssetsUrl:
+                "./UnityBuild/StreamingAssets",
+
+            companyName:
+                "TuEmpresa",
+
+            productName:
+                "mindar-test",
+
+            productVersion:
+                "1.0",
+
+            webglContextAttributes: {
+                alpha: true,
+                premultipliedAlpha: false,
+                preserveDrawingBuffer: true
+            }
+
+        };
+
+
+        /*
+        ============================================================
+        FUNCIÓN:
+        ENVIAR ESTADO DEL TARGET A UNITY
+        ============================================================
+        */
+
+        function sendTargetStateToUnity() {
+
+            /*
+            Si Unity todavía no terminó de cargar,
+            simplemente esperamos.
+
+            El estado targetIsFound se conserva.
+            */
+
+            if (!unityReady || !unityInstance) {
+
+                console.log(
+                    "Unity todavía no está listo."
+                );
+
+                return;
+            }
+
+
+            /*
+            TARGET ENCONTRADO
+            */
+
+            if (targetIsFound) {
+
+                console.log(
+                    "JS → UNITY: TargetFound()"
+                );
+
+                unityInstance.SendMessage(
+                    "WebARController",
+                    "TargetFound"
+                );
+
+            }
+
+
+            /*
+            TARGET PERDIDO
+            */
+
+            else {
+
+                console.log(
+                    "JS → UNITY: TargetLost()"
+                );
+
+                unityInstance.SendMessage(
+                    "WebARController",
+                    "TargetLost"
+                );
+
+            }
+
+        }
+
+
+        /*
+        ============================================================
+        INICIAR UNITY
+        ============================================================
+        */
+
+        createUnityInstance(
+
+            unityCanvas,
+
+            unityConfig,
+
+            function(progress) {
+
+                /*
+                Progreso de carga.
+                */
+
+                status.textContent =
+                    "Cargando Unity: " +
+                    Math.round(progress * 100) +
+                    "%";
+
+            }
+
+        ).then(function(instance) {
+
+            /*
+            Unity terminó de cargar.
+            */
+
+            unityInstance = instance;
+
+            unityReady = true;
+
+
+            console.log(
+                "UNITY: Unity WebGL está listo"
+            );
+
+
+            status.textContent =
+                "Unity listo — busca el marcador";
+
+
+            /*
+            IMPORTANTE:
+
+            Si MindAR encontró el target ANTES de que Unity
+            terminara de cargar, aquí mandamos el estado actual.
+            */
+
+            sendTargetStateToUnity();
+
+            if (mindARReady){
+                sendCameraDataToUnity();    
+            }
+
+
+        }).catch(function(error) {
+
+            console.error(
+                "ERROR AL CARGAR UNITY:",
+                error
+            );
+
+            status.textContent =
+                "Error al cargar Unity — revisa la consola";
+
+        });
+
+
+        /*
+        ============================================================
+        MINDAR:
+        TARGET ENCONTRADO
+        ============================================================
+        */
+
+        target.addEventListener(
+            "targetFound",
+            function() {
+
+                console.log(
+                    "MINDAR: TARGET FOUND"
+                );
+
+                targetIsFound = true;
+
+
+                status.textContent =
+                    "✓ TARGET ENCONTRADO";
+
+
+                /*
+                Mandamos el evento a Unity.
+                */
+
+                sendTargetStateToUnity();
+
+            }
+        );
+
+
+        function logMindARCamera() {
+            const scene = document.querySelector('a-scene');
+            const camera = scene.camera;
+
+            if (!camera) {
+                console.log("MINDAR CAMERA: todavía no existe");
+                return;
+            }
+
+            console.log("===== MINDAR CAMERA =====");
+            console.log("FOV:", camera.fov);
+            console.log("Aspect:", camera.aspect);
+            console.log("Near:", camera.near);
+            console.log("Far:", camera.far);
+        }
+
+        function sendPoseToUnity() {
+
+            if (!targetIsFound) {
+                return;
+            }
+
+            if (!unityReady || !unityInstance) {
+                return;
+            }
+
+            const matrix = target.object3D.matrixWorld;
+
+            const position = new THREE.Vector3();
+            const quaternion = new THREE.Quaternion();
+            const scale = new THREE.Vector3();
+
+            matrix.decompose(
+                position,
+                quaternion,
+                scale
+            );
+
+            const pose = {
+
+                position: {
+                    x: position.x,
+                    y: position.y,
+                    z: position.z
+                },
+
+                rotation: {
+                    x: quaternion.x,
+                    y: quaternion.y,
+                    z: quaternion.z,
+                    w: quaternion.w
+                },
+
+                scale: {
+                    x: scale.x,
+                    y: scale.y,
+                    z: scale.z
+                }
+
+            };
+
+            const poseData = JSON.stringify(pose);
+
+            unityInstance.SendMessage(
+                "WebARController",
+                "ReceivePose",
+                poseData
+            );
+        }
+
+        /*Mandar toda la informacion de la camara mindAr a la camara de Unity*/
+
+        function sendCameraDataToUnity() {
+            if (!unityReady || !unityInstance) {
+                console.log('Unity todavía no está listo para recibir la cámara.');
+                return;
+            }
+
+            const scene = document.querySelector('a-scene');
+            const camera = scene.camera;
+
+            if (!camera) {
+                console.log('MindAR camera todavía no está disponible.');
+                return;
+            }
+
+            const cameraData = {
+                fov: camera.fov,
+                aspect: camera.aspect
+            };
+
+            const cameraDataJSON = JSON.stringify(cameraData);
+
+            console.log('JS → UNITY: CameraData');
+            console.log(cameraDataJSON);
+
+            unityInstance.SendMessage(
+                "WebARController",
+                "ReceiveCameraData",
+                cameraDataJSON
+            );
+        }
+        
+/*Mandar toda la inforamacion a unity con la funcion anterior*/
+        setInterval(() => {
+            sendPoseToUnity();
+        }, 50);
+
+        /*
+        ============================================================
+        MINDAR:
+        TARGET PERDIDO
+        ============================================================
+        */
+
+        target.addEventListener(
+            "targetLost",
+            function() {
+
+                console.log(
+                    "MINDAR: TARGET LOST"
+                );
+
+                targetIsFound = false;
+
+
+                status.textContent =
+                    "Marcador perdido";
+
+
+                /*
+                Mandamos el evento a Unity.
+                */
+
+                sendTargetStateToUnity();
+
+            }
+        );
+
+
+        /*
+        ============================================================
+        MINDAR:
+        AR LISTO
+        ============================================================
+        */
+
+        document
+            .querySelector("a-scene")
+            .addEventListener(
+                "arReady",
+                function() {
+
+                    console.log(
+                        "MINDAR: AR READY"
+                    );
+
+                    status.textContent =
+                        "Cámara lista — busca el marcador";
+
+                    mindARReady = true;
+
+                    logMindARCamera();
+
+                    sendCameraDataToUnity();
+
+                }
+            );
+
+
+        /*
+        ============================================================
+        MINDAR:
+        ERROR
+        ============================================================
+        */
+
+        document
+            .querySelector("a-scene")
+            .addEventListener(
+                "arError",
+                function(event) {
+
+                    console.error(
+                        "MINDAR AR ERROR:",
+                        event
+                    );
+
+                    status.textContent =
+                        "Error al iniciar AR";
+
+                }
+            );
+
+    </script>
+
+</body>
+
+</html>

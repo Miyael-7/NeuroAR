@@ -1,0 +1,19 @@
+
+# Windows
+Thumbs.db
+desktop.ini
+.DS_Store
+
+# Editors
+.vscode/
+.idea/
+
+# Logs
+*.log
+
+# Unity editor temporary files
+Library/
+Temp/
+Obj/
+Logs/
+UserSettings/
