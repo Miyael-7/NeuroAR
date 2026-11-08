@@ -108,7 +108,7 @@ The project is intended to be hosted using **GitHub Pages**, providing a public 
 
 Access NeuroAR:
 
-https://miyael-7.github.io/NueroAR/
+https://miyael-7.github.io/NeuroAR/
 
 ## Project Goals
 
