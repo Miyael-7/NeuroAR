@@ -104,7 +104,11 @@ http://localhost:8000
 
 The project is intended to be hosted using **GitHub Pages**, providing a public HTTPS URL.
 
-**Live application:** Pending deployment.
+## Live Application 
+
+Access NeuroAR:
+
+https://miyael-7.github.io/NueroAR/
 
 ## Project Goals
 
